@@ -86,7 +86,7 @@ def normalize_to_neg_one_to_one(img):
 def unnormalize_to_zero_to_one(t):
     return (t + 1) * 0.5
 
-# small helper modules
+# small helper modules of Upsampling and Downsampling
 
 def Upsample(dim, dim_out = None):
     return nn.Sequential(
@@ -109,9 +109,11 @@ class RMSNorm(Module):
     def forward(self, x):
         return F.normalize(x, dim = 1) * self.g * self.scale
 
-# sinusoidal positional embeds
-
 class SinusoidalPosEmb(Module):
+    # sinusoidal positional embeds (to know relative time diff)
+    # input : (B,1),  the noise levels of several noisy images in a batch
+    # output : (B, dim), dim being the dimensionality of the position embeddings.
+
     def __init__(self, dim, theta = 10000):
         super().__init__()
         self.dim = dim
@@ -143,7 +145,9 @@ class RandomOrLearnedSinusoidalPosEmb(Module):
         fouriered = torch.cat((x, fouriered), dim = -1)
         return fouriered
 
+
 # building block modules
+# DDPM use ResNetBlock
 
 class Block(Module):
     def __init__(self, dim, dim_out, dropout = 0.):
@@ -189,6 +193,9 @@ class ResnetBlock(Module):
         h = self.block2(h)
 
         return h + self.res_conv(x)
+
+
+# Attention module
 
 class LinearAttention(Module):
     def __init__(
@@ -901,7 +908,8 @@ class Trainer:
         inception_block_idx = 2048,
         max_grad_norm = 1.,
         num_fid_samples = 50000,
-        save_best_and_latest_only = False
+        save_best_and_latest_only = False,
+        save_reverse_process_all = False
     ):
         super().__init__()
 
@@ -1079,13 +1087,29 @@ class Trainer:
                         self.ema.ema_model.eval()
 
                         with torch.inference_mode():
-                            milestone = self.step // self.save_and_sample_every
-                            batches = num_to_groups(self.num_samples, self.batch_size)
-                            all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n), batches))
+                            if self.save_reverse_process_all:
+                                milestone = self.step // self.save_and_sample_every
+                                sample_shape = (self.num_samples, self.channels, *self.image_size)
+                                
+                                all_timesteps = self.ema.ema_model.p_sample_loop(sample_shape, return_all_timesteps=True)
+                            
+                                T = all_timesteps.shape[1]
+                                num_steps_to_save = 10
+                                indices = torch.linspace(0, T - 1, steps=num_steps_to_save, dtype=torch.long)
+                                
+                                for idx, sample in enumerate(all_timesteps):  # sample shape: (T, C, H, W)
+                                    selected = sample[indices]  
+                                    utils.save_image(selected, 
+                                                    str(self.results_folder / f'sample-{milestone}_process_{idx}.png'), 
+                                                    nrow=5)
+                            else:
+                                milestone = self.step // self.save_and_sample_every
+                                batches = num_to_groups(self.num_samples, self.batch_size)
+                                all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n), batches))
 
-                        all_images = torch.cat(all_images_list, dim = 0)
+                                all_images = torch.cat(all_images_list, dim = 0)
 
-                        utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
+                                utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
 
                         # whether to calculate fid
 
