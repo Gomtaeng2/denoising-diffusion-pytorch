@@ -907,9 +907,8 @@ class Trainer:
         calculate_fid = True,
         inception_block_idx = 2048,
         max_grad_norm = 1.,
-        num_fid_samples = 50000,
+        num_fid_samples = 1000,
         save_best_and_latest_only = False,
-        save_reverse_process_all = False
     ):
         super().__init__()
 
@@ -1049,6 +1048,9 @@ class Trainer:
             self.accelerator.scaler.load_state_dict(data['scaler'])
 
     def train(self):
+        ##############################
+        save_reverse_process_all = True
+        ##############################
         accelerator = self.accelerator
         device = accelerator.device
 
@@ -1082,34 +1084,31 @@ class Trainer:
                 self.step += 1
                 if accelerator.is_main_process:
                     self.ema.update()
-
+                    
                     if self.step != 0 and divisible_by(self.step, self.save_and_sample_every):
                         self.ema.ema_model.eval()
-
                         with torch.inference_mode():
-                            if self.save_reverse_process_all:
+                            if save_reverse_process_all:
                                 milestone = self.step // self.save_and_sample_every
                                 sample_shape = (self.num_samples, self.channels, *self.image_size)
-                                
                                 all_timesteps = self.ema.ema_model.p_sample_loop(sample_shape, return_all_timesteps=True)
-                            
                                 T = all_timesteps.shape[1]
-                                num_steps_to_save = 10
+                                num_steps_to_save = 25
                                 indices = torch.linspace(0, T - 1, steps=num_steps_to_save, dtype=torch.long)
                                 
-                                for idx, sample in enumerate(all_timesteps):  # sample shape: (T, C, H, W)
-                                    selected = sample[indices]  
-                                    utils.save_image(selected, 
-                                                    str(self.results_folder / f'sample-{milestone}_process_{idx}.png'), 
-                                                    nrow=5)
+                                for i, idx in enumerate(indices):
+                                    step_images = all_timesteps[:, idx]
+                                    utils.save_image(step_images, 
+                                                    str(self.results_folder / f'sample-{milestone}_step_{i}.png'),
+                                                    nrow=int(math.sqrt(self.num_samples)))
                             else:
                                 milestone = self.step // self.save_and_sample_every
                                 batches = num_to_groups(self.num_samples, self.batch_size)
                                 all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n), batches))
-
-                                all_images = torch.cat(all_images_list, dim = 0)
-
-                                utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
+                                all_images = torch.cat(all_images_list, dim=0)
+                                utils.save_image(all_images, 
+                                                str(self.results_folder / f'sample-{milestone}.png'),
+                                                nrow=int(math.sqrt(self.num_samples)))
 
                         # whether to calculate fid
 

@@ -16,14 +16,14 @@ diffusion = GaussianDiffusion(
 trainer = Trainer(
     diffusion,
     'bin_sample',
-    train_batch_size = 32,
+    train_batch_size = 64,
     train_lr = 8e-5,
-    train_num_steps = 150000,         # total training steps
+    train_num_steps = 100000,         # total training steps
     gradient_accumulate_every = 1,    # gradient accumulation steps
     ema_decay = 0.995,                # exponential moving average decay
     amp = True,                       # turn on mixed precision
     calculate_fid = True,             # whether to calculate fid during training
-    save_reverse_process_all = True
+    save_and_sample_every = 1000
 )
-trainer.load(1)
+trainer.load(35)
 trainer.train()
